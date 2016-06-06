@@ -7,10 +7,10 @@ Created on June 02 2016
 
 # import relevant modules
 import numpy as np
-from dipy.sims.voxel import multi_tensor
+from dipy.sims.voxel import (multi_tensor, _add_gaussian, _add_rician,
+                             _add_rayleigh)
 
-
-def rfiw_phantom(gtab, snr=None):
+def rfiw_phantom(gtab, snr=None, noise_type='rician'):
     """retangle fiber immersed in water"""
 
     # define voxel index
@@ -68,10 +68,19 @@ def rfiw_phantom(gtab, snr=None):
     if snr is None:
         return DWI
     else:
+        noise_adder = {'gaussian': _add_gaussian,
+                       'rician': _add_rician,
+                       'rayleigh': _add_rayleigh}
+        
         sigma = S2 * 1.0 /snr
         n1 = np.random.normal(0, sigma, size=DWI.shape)
-        n2 = np.random.normal(0, sigma, size=DWI.shape)
-        return np.sqrt((DWI/np.sqrt(2) + n1)**2 + (DWI/np.sqrt(2) + n2)**2)
+        if noise_type == 'gaussian':
+            n2 = None
+        else:
+            n2 = np.random.normal(0, sigma, size=DWI.shape)
+
+        return noise_adder[noise_type](DWI, n1, n2)
+
 
 # -----------------------------------------------------------------
 # PCA
@@ -88,7 +97,7 @@ def localpca(DWI, psize):
                 M = np.mean(X, axis=0)
                 X = X - M
                 [L, W] = np.linalg.eigh(np.dot(X.T, X)/m)
-                # [W, L] = eig(X'*X);
+                
     return M
 
 def mp_distribution(x, var, y):
@@ -108,9 +117,10 @@ def mp_distribution(x, var, y):
     """
     xpos = var * (1 + np.sqrt(y)) ** 2
     xneg = var * (1 - np.sqrt(y)) ** 2
-    
+
     p = np.zeros(x.shape)
     xdis = np.logical_and(x<xpos, x>xneg)
-    p[xdis] = 1/(2*np.pi*var) * np.sqrt((xpos-x[xdis]) * (x[xdis]-xneg)) / (y * x[xdis])
+    p[xdis] = np.sqrt((xpos-x[xdis]) * (x[xdis]-xneg)) / (2*np.pi*var*y*x[xdis])
 
     return p
+
