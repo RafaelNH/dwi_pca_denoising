@@ -81,6 +81,51 @@ def rfiw_phantom(gtab, snr=None, noise_type='rician'):
 
         return noise_adder[noise_type](DWI, n1, n2)
 
+# -----------------------------------------------------------------
+# Fiber segments phantom
+# -----------------------------------------------------------------
+
+def fiber_segments_phantom(gtab, fiber_sigma, snr=None, noise_type='rician'):
+    Phantom = np.zeros((10, 10, 10, gtab.bvals.size))
+    n1 = np.random.normal(90, fiber_sigma, size=Phantom.shape[:-1])
+    n2 = np.random.normal(0, fiber_sigma, size=Phantom.shape[:-1])
+
+    ADr = 0.99e-3
+    RDr = 0.0
+    ADh = 2.26e-3
+    RDh = 0.87
+    S1 = 50
+    fia = 0.51
+
+    mevals = np.array([[ADr, RDr, RDr], [ADh, RDh, RDh]])
+    fractions = [fia*100, (1-fia) * 100]
+
+    for i in range(10):
+        for j in range(10):
+            for k in range(10):
+                angles=[(n1[i, j, k], n2[i, j, k]), (n1[i, j, k], n2[i, j, k])]
+                sig, direction = multi_tensor(gtab, mevals, S0=S1,
+                                              angles=angles,
+                                              fractions=fractions,
+                                              snr=None)
+                Phantom[i, j, k, :] = sig
+
+    if snr is None:
+        return Phantom
+    else:
+        noise_adder = {'gaussian': _add_gaussian,
+                       'rician': _add_rician,
+                       'rayleigh': _add_rayleigh}
+        
+        sigma = S1 * 1.0 /snr
+        n1 = np.random.normal(0, sigma, size=Phantom.shape)
+        if noise_type == 'gaussian':
+            n2 = None
+        else:
+            n2 = np.random.normal(0, sigma, size=Phantom.shape)
+
+        return noise_adder[noise_type](Phantom, n1, n2)
+    
 
 # -----------------------------------------------------------------
 # PCA
