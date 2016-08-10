@@ -179,7 +179,7 @@ def pca_noise_classifier(L, m):
         r = L[c] - L[0] - 4*np.sqrt((c+1.0) / m) * sig2
     return c + 1, sig2
 
-def pca_denoising(dwi, psize=2):
+def pca_denoising(dwi, ps=2, overcomplete=False):
     """ Denoises DWI volumes using PCA analysis and Marchenko–Pastur
     probability theory
 
@@ -187,9 +187,12 @@ def pca_denoising(dwi, psize=2):
     ----------
     dwi : array ([X, Y, Z, g])
         Matrix containing the 4D DWI data.
-    psize : int
+    ps : int
         Number of neighbour voxels for the PCA analysis.
         Default: 2
+    overcomplete : boolean
+        If set to True, overcomplete local PCA is computed
+        Default: False
 
     Returns
     -------
@@ -203,19 +206,21 @@ def pca_denoising(dwi, psize=2):
         4D data.
     """
     # Compute dimension of neighbour sliding window
-    m = (2*psize + 1) ** 3
+    m = (2*ps + 1) ** 3
 
     n = dwi.shape[3]
     den = np.zeros(dwi.shape)
     ncomps = np.zeros(dwi.shape[:3])
     sig2 = np.zeros(dwi.shape[:3])
+    if overcomplete:
+        wei = np.zeros(dwi.shape)
 
-    for k in range(psize, dwi.shape[2] - psize):
-        for j in range(psize, dwi.shape[1] - psize):
-            for i in range(psize, dwi.shape[0] - psize):
+    for k in range(ps, dwi.shape[2] - ps):
+        for j in range(ps, dwi.shape[1] - ps):
+            for i in range(ps, dwi.shape[0] - ps):
                 # Compute eigenvalues for sliding window
-                X = dwi[i - psize: i + psize + 1, j - psize: j + psize + 1,
-                        k - psize: k + psize + 1, :]
+                X = dwi[i - ps: i + ps + 1, j - ps: j + ps + 1,
+                        k - ps: k + ps + 1, :]
                 X = X.reshape(m, n)
                 M = np.mean(X, axis=0)
                 X = X - M
@@ -223,16 +228,46 @@ def pca_denoising(dwi, psize=2):
 
                 # Find number of noise related eigenvalues
                 c, sig = pca_noise_classifier(L, m)
-                ncomps[i, j, k] = c
-                sig2[i, j, k] = sig
 
                 # Reconstruct signal without noise components
                 Y = X.dot(W[:, c:])
                 X = Y.dot(W[:, c:].T)
                 X = X + M
-                X = X.reshape(2*psize + 1, 2*psize + 1, 2*psize + 1, n)
-                den[i, j, k, :] = X[psize, psize, psize]
+                X = X.reshape(2*ps + 1, 2*ps + 1, 2*ps + 1, n)
 
+                # Overcomplete weighting
+                if overcomplete:
+                    w = 1.0 / (1.0 + n - c)
+                    wei[i - ps: i + ps + 1,
+                        j - ps: j + ps + 1,
+                        k - ps: k + ps + 1] = wei[i - ps: i + ps + 1,
+                                                  j - ps: j + ps + 1,
+                                                  k - ps: k + ps + 1] + w
+                    X = X * w
+                    den[i - ps: i + ps + 1,
+                        j - ps: j + ps + 1,
+                        k - ps: k + ps + 1, :] = den[i - ps: i + ps + 1,
+                                                     j - ps: j + ps + 1,
+                                                     k - ps: k + ps + 1, :] + X
+                    ncomps[i - ps: i + ps + 1,
+                           j - ps: j + ps + 1,
+                           k - ps: k + ps + 1] = ncomps[i - ps: i + ps + 1,
+                                                        j - ps: j + ps + 1,
+                                                        k - ps: k + ps + 1] + (n-c)*w
+                    sig2[i - ps: i + ps + 1,
+                           j - ps: j + ps + 1,
+                           k - ps: k + ps + 1] = sig2[i - ps: i + ps + 1,
+                                                      j - ps: j + ps + 1,
+                                                      k - ps: k + ps + 1] + sig*w
+                else:
+                    den[i, j, k, :] = X[ps, ps, ps]
+                    ncomps[i, j, k] = n - c
+                    sig2[i, j, k] = sig
+
+    if overcomplete:
+        den = den / wei
+        ncomps = ncoms / wei
+        sig2 = sig2 / wei
     return den, np.sqrt(sig2), ncomps
 
 def localpca(DWI, psize, nep):
