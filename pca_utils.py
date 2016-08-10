@@ -130,20 +130,6 @@ def fiber_segments_phantom(gtab, fiber_sigma, snr=None, noise_type='rician'):
 # -----------------------------------------------------------------
 # PCA
 # -----------------------------------------------------------------
-def localpca(DWI, psize):
-    m = (2*psize + 1) ** 3
-    n = DWI.shape[3]
-    for k in range(psize, DWI.shape[2] - psize):
-        for j in range(psize, DWI.shape[1] - psize):
-            for i in range(psize, DWI.shape[0] - psize):
-                X = DWI[i - psize: i + psize + 1, j - psize: j + psize + 1,
-                        k - psize: k + psize + 1, :]
-                X = X.reshape(m, n)
-                M = np.mean(X, axis=0)
-                X = X - M
-                [L, W] = np.linalg.eigh(np.dot(X.T, X)/m)
-                
-    return M
 
 def mp_distribution(x, var, y):
     """ Samples the Marchenko–Pastur probability distribution
@@ -212,6 +198,9 @@ def pca_denoising(dwi, psize=2):
     std : array ([X, Y, Z])
         Matrix containing the noise std estimated using
         Marchenko-Pastur probability theory.
+    ncomps : array ([X, Y, Z])
+        Number of eigenvalues preserved for the denoised
+        4D data.
     """
     # Compute dimension of neighbour sliding window
     m = (2*psize + 1) ** 3
@@ -245,4 +234,41 @@ def pca_denoising(dwi, psize=2):
                 den[i, j, k, :] = X[psize, psize, psize]
 
     return den, np.sqrt(sig2), ncomps
+
+def localpca(DWI, psize, nep):
+    # performes localpca given the number of elements to be preserved
+    m = (2*psize + 1) ** 3
+    n = DWI.shape[3]
+    DWIden = np.zeros(DWI.shape)
+    for k in range(psize, DWI.shape[2] - psize):
+        for j in range(psize, DWI.shape[1] - psize):
+            for i in range(psize, DWI.shape[0] - psize):
+                X = DWI[i - psize: i + psize + 1, j - psize: j + psize + 1,
+                        k - psize: k + psize + 1, :]
+                X = X.reshape(m, n)
+                M = np.mean(X, axis=0)
+                X = X - M
+                [L, W] = np.linalg.eigh(np.dot(X.T, X)/m)
+                Y = X.dot(W[:, -nep:])
+                X = Y.dot(W[:, -nep:].T)
+                X = X + M
+                X = X.reshape(2*psize + 1, 2*psize + 1, 2*psize + 1, n)
+                DWIden[i, j, k, :] = X[psize, psize, psize]
+    return DWIden
+
+def evaluate_directions(directions, gtdirections):
+    angle = np.zeros(directions.shape[0:3])
+    for i in range(directions.shape[0]):
+        for j in range(directions.shape[1]):
+            for k in range(directions.shape[0]):
+                v1 = directions[i, j, k]
+                vr = gtdirections[i, j, k]
+                angle[i, j, k] = np.arccos(np.abs(v1.dot(vr.T))) * 180.0 / np.pi
+    p1, p2, p3 = np.percentile(angle, [25 , 50, 75])
+    return p2, p2 - p1, p3 - p2
+
+def evaluate_metric(m, gtm):
+    err = m - gtm
+    p1, p2, p3 = np.percentile(err, [25, 50, 75])
+    return p2, p2 - p1, p3 - p2
 
