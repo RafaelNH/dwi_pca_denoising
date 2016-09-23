@@ -179,7 +179,7 @@ def pca_noise_classifier(L, m):
         r = L[c] - L[0] - 4*np.sqrt((c+1.0) / m) * sig2
     return c + 1, sig2
 
-def pca_denoising(dwi, ps=2, overcomplete=False):
+def pca_denoising(dwi, ps=2, overcomplete=True):
     """ Denoises DWI volumes using PCA analysis and Marchenko–Pastur
     probability theory
 
@@ -240,9 +240,9 @@ def pca_denoising(dwi, ps=2, overcomplete=False):
                     w = 1.0 / (1.0 + n - c)
                     wei[i - ps: i + ps + 1,
                         j - ps: j + ps + 1,
-                        k - ps: k + ps + 1] = wei[i - ps: i + ps + 1,
-                                                  j - ps: j + ps + 1,
-                                                  k - ps: k + ps + 1] + w
+                        k - ps: k + ps + 1, :] = wei[i - ps: i + ps + 1,
+                                                     j - ps: j + ps + 1,
+                                                     k - ps: k + ps + 1, :] + w
                     X = X * w
                     den[i - ps: i + ps + 1,
                         j - ps: j + ps + 1,
@@ -266,8 +266,8 @@ def pca_denoising(dwi, ps=2, overcomplete=False):
 
     if overcomplete:
         den = den / wei
-        ncomps = ncoms / wei
-        sig2 = sig2 / wei
+        ncomps = ncomps / wei[..., 0]
+        sig2 = sig2 / wei[..., 0]
     return den, np.sqrt(sig2), ncomps
 
 def localpca(DWI, psize, nep):
