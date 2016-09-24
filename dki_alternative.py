@@ -4,12 +4,17 @@ Created on Fri Sep 23 14:42:14 2016
 
 @author: Rafael
 """
+from __future__ import division, print_function, absolute_import
 
 import numpy as np
 
 from dipy.core.ndindex import ndindex
 
+from dipy.reconst.dti import (from_lower_triangular, decompose_tensor)
+
 import scipy.optimize as opt
+
+from dipy.reconst.utils import dki_design_matrix as design_matrix
 
 
 def _dirfit_iter(inv_W, sig, min_signal=1.0e-6):
@@ -282,4 +287,126 @@ def avs_dki_df(gtab, data, mask=None, min_signal=1.0e-6):
             p[1] = p[1] / (p[0]**2)
             p[2] = np.exp(p[2])
             params[v] = p
+    return params
+
+
+def _wls_iter_gc(design_matrix, inv_design, sig, min_diffusivity, gc):
+    """ Helper function used by wls_fit_dki - Applies WLS fit of the diffusion
+    kurtosis model to single voxel signals.
+
+    Parameters
+    ----------
+    design_matrix : array (g, 22)
+        Design matrix holding the covariants used to solve for the regression
+        coefficients
+    inv_design : array (g, 22)
+        Inverse of the design matrix.
+    sig : array (g, )
+        Diffusion-weighted signal for a single voxel data.
+    min_diffusivity : float
+        Because negative eigenvalues are not physical and small eigenvalues,
+        much smaller than the diffusion weighting, cause quite a lot of noise
+        in metrics such as fa, diffusivity values smaller than
+        `min_diffusivity` are replaced with `min_diffusivity`.
+
+    Returns
+    -------
+    dki_params : array (27, )
+        All parameters estimated from the diffusion kurtosis model.
+        Parameters are ordered as follows:
+            1) Three diffusion tensor's eigenvalues
+            2) Three lines of the eigenvector matrix each containing the first,
+               second and third coordinates of the eigenvector
+            3) Fifteen elements of the kurtosis tensor
+    """
+    A = design_matrix
+
+    # DKI ordinary linear least square solution
+    log_s = np.log(sig)
+    ols_result = np.dot(inv_design, log_s)
+
+    # Define weights as diag(yn**2)
+    W = np.diag(gc**2 * np.exp(2 * np.dot(A, ols_result)))
+
+    # DKI weighted linear least square solution
+    inv_AT_W_A = np.linalg.pinv(np.dot(np.dot(A.T, W), A))
+    AT_W_LS = np.dot(np.dot(A.T, W), log_s)
+    wls_result = np.dot(inv_AT_W_A, AT_W_LS)
+
+    # Extracting the diffusion tensor parameters from solution
+    DT_elements = wls_result[:6]
+    evals, evecs = decompose_tensor(from_lower_triangular(DT_elements),
+                                    min_diffusivity=min_diffusivity)
+
+    # Extracting kurtosis tensor parameters from solution
+    MD_square = (evals.mean(0))**2
+    KT_elements = wls_result[6:21] / MD_square
+
+    # Write output
+    dki_params = np.concatenate((evals, evecs[0], evecs[1], evecs[2],
+                                 KT_elements), axis=0)
+
+    return dki_params
+
+
+def wls_fit_dki(gtab, data, gc=None, mask=None, min_signal=1.0e-6):
+    r""" Computes weighted linear least squares (WLS) fit to calculate
+    the diffusion tensor and kurtosis tensor using a weighted linear
+    regression diffusion kurtosis model [1]_.
+
+    Parameters
+    ----------
+    gtab : a GradientTable class instance
+        The gradient table containing diffusion acquisition parameters.
+    data : ndarray ([X, Y, Z, ...], g)
+        Data or response variables holding the data. Note that the last
+        dimension should contain the data. It makes no copies of data.
+    gc : array (g,)
+        Factores to correct different variances along different gradient
+        directions. Default: np.ones(g) (for this case variance is assumed
+        to be constant along different gradient directions)
+    mask : array, optional
+        A boolean array used to mark the coordinates in the data that should
+        be analyzed that has the shape data.shape[:-1]
+    min_signal : float
+        The minimum signal value. Needs to be a strictly positive
+        number. Default: 1.0e-6.
+
+    Returns
+    -------
+    dki_params : array (N, 27)
+        All parameters estimated from the diffusion kurtosis model for all N
+        voxels.
+        Parameters are ordered as follows:
+            1) Three diffusion tensor's eigenvalues
+            2) Three lines of the eigenvector matrix each containing the first
+               second and third coordinates of the eigenvector
+            3) Fifteen elements of the kurtosis tensor
+    """
+    data = np.maximum(data, min_signal)
+
+    params = np.zeros(data.shape[:-1] + (27,))
+
+    B = design_matrix(gtab)
+    inv_B = np.linalg.pinv(B)
+    min_diffusivity = min_signal / -B.min()
+
+    # Prepare gc
+    if gc is None:
+        gc = np.ones(gtab.bvals.size)
+
+    # Prepare mask
+    if mask is None:
+        mask = np.ones(data.shape[:-1], dtype=bool)
+    else:
+        if mask.shape != data.shape[:-1]:
+            raise ValueError("Mask is not the same shape as data.")
+        mask = np.array(mask, dtype=bool, copy=False)
+
+    index = ndindex(mask.shape)
+    for v in index:
+        if mask[v]:
+            p = _wls_iter_gc(B, inv_B, data[v], min_diffusivity, gc)
+            params[v] = p
+
     return params
