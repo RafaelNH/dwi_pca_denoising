@@ -7,7 +7,6 @@ Created on June 02 2016
 
 # import relevant modules
 import numpy as np
-from dipy.sims.voxel import multi_tensor
 
 
 def mp_distribution(x, var, y):
