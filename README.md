@@ -1,6 +1,6 @@
 # PCA denoising
 
-This algorithm denoising data using a PCA. Code was implemeted based on the algorithm suggested by:
+This algorithm denoising data using PCA. Code was implemeted based on the algorithm suggested by:
 
 [Veraart et al. Denoising of diffusion MRI using random matrix theory (2016). Neuroimage 142:394-406](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC5159209/)
 
